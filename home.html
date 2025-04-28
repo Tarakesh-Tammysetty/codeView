@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>ZIP Code Viewer</title>
+  <style>
+    body { margin: 0; display: flex; height: 100vh; overflow: hidden; font-family: sans-serif; }
+    #sidebar { width: 250px; background: #222; color: white; overflow-y: auto; padding: 10px; }
+    #editor { flex-grow: 1; }
+    .folder, .file { cursor: pointer; margin: 5px 0; }
+    .folder { font-weight: bold; }
+    .children { margin-left: 15px; display: none; }
+    .search-bar { margin-bottom: 10px; }
+  </style>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.34.1/min/vs/editor/editor.main.min.css" />
+</head>
+<body>
+
+<div id="sidebar">
+  <input type="file" id="file-input" accept=".zip" />
+  <div class="search-bar">
+    <input type="text" id="search-input" placeholder="Search in file..." style="width: 100%;">
+  </div>
+  <div id="file-tree"></div>
+</div>
+
+<div id="editor"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.34.1/min/vs/loader.min.js"></script>
+
+<script>
+  let zip = null;
+  let filesContent = {};
+  let editor;
+
+  require.config({ paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.34.1/min/vs' }});
+  require(['vs/editor/editor.main'], function() {
+    editor = monaco.editor.create(document.getElementById('editor'), {
+      value: '',
+      language: 'javascript',
+      readOnly: true,
+      theme: 'vs-dark'
+    });
+  });
+
+  document.getElementById('file-input').addEventListener('change', async (event) => {
+    const file = event.target.files[0];
+    if (file) {
+      zip = await JSZip.loadAsync(file);
+      const tree = buildTree(zip.files);
+      document.getElementById('file-tree').innerHTML = '';
+      document.getElementById('file-tree').appendChild(tree);
+    }
+  });
+
+  function buildTree(files) {
+    const root = document.createElement('div');
+    const map = {};
+
+    Object.keys(files).forEach((path) => {
+      const parts = path.split('/');
+      let current = map;
+      parts.forEach((part, i) => {
+        if (!part) return;
+        if (!current[part]) {
+          current[part] = { __isFolder: (i < parts.length - 1), __children: {} };
+        }
+        current = current[part].__children;
+      });
+    });
+
+    function createNodes(node, parentEl) {
+      Object.keys(node).forEach((key) => {
+        const item = node[key];
+        const el = document.createElement('div');
+        el.textContent = key;
+        el.className = item.__isFolder ? 'folder' : 'file';
+        parentEl.appendChild(el);
+
+        if (item.__isFolder) {
+          const childrenContainer = document.createElement('div');
+          childrenContainer.className = 'children';
+          el.appendChild(childrenContainer);
+
+          el.addEventListener('click', () => {
+            childrenContainer.style.display = (childrenContainer.style.display === 'none') ? 'block' : 'none';
+          });
+
+          createNodes(item.__children, childrenContainer);
+        } else {
+          el.addEventListener('click', () => loadFile(key));
+        }
+      });
+    }
+
+    createNodes(map, root);
+    return root;
+  }
+
+  async function loadFile(fileName) {
+    const file = Object.values(zip.files).find(f => f.name.endsWith(fileName));
+    if (file) {
+      const content = await file.async('text');
+      filesContent[fileName] = content;
+      editor.setValue(content);
+      editor.updateOptions({ language: detectLanguage(fileName) });
+    }
+  }
+
+  function detectLanguage(fileName) {
+    const ext = fileName.split('.').pop();
+    switch (ext) {
+      case 'js': return 'javascript';
+      case 'html': return 'html';
+      case 'css': return 'css';
+      case 'json': return 'json';
+      case 'ts': return 'typescript';
+      case 'py': return 'python';
+      default: return 'plaintext';
+    }
+  }
+
+  document.getElementById('search-input').addEventListener('input', (e) => {
+    const value = e.target.value;
+    if (!value) {
+      editor.getAction('actions.find').run();
+    } else {
+      editor.trigger('keyboard', 'actions.find');
+      editor.getModel().findMatches(value, true, false, false, null, true);
+    }
+  });
+</script>
+
+</body>
+</html>
